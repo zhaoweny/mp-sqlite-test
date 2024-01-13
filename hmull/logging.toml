@@ -8,12 +8,12 @@ style = "{"
 [handlers.console]
 level = "INFO"
 formatter = "simple"
-class = "StreamHandler"
+class = "logging.StreamHandler"
 stream = "ext://sys.stdout"
 
 [handlers.file]
 formatter = "simple"
-class = "handlers.RotatingFileHandler"
+class = "logging.handlers.RotatingFileHandler"
 filename = "demo.log"
 maxBytes = 10485760  # 10MB
 backupCount = 3

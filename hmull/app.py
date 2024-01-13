@@ -2,7 +2,7 @@ import copy
 import logging
 import multiprocessing
 import tomllib
-from concurrent.futures import ProcessPoolExecutor, Executor
+from concurrent.futures import ProcessPoolExecutor, Executor, as_completed
 from contextlib import ExitStack, contextmanager
 from logging.config import dictConfig as logging_dictConfig
 from logging.handlers import QueueListener, QueueHandler
@@ -14,6 +14,11 @@ from sqlalchemy.orm import Session
 from hmull import worker
 from hmull.model import ModelBase, DemoTable
 from hmull.worker import WorkerConfig
+
+try:
+    from itertools import batched
+except ImportError:
+    from more_itertools import chunked as batched
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +45,21 @@ class DemoApp:
             ProcessPoolExecutor(initializer=worker.init, initargs=(self._config,))
         )
 
-    def process(self, jobs, ops=100):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self._stack.__exit__(*args)
+
+    def process(self, jobs: int, ops: int = 100):
         begin = self._session.scalar(Select(sa_func.count(DemoTable.id)))
         logger.info(f"starting mp_process: op_total = {jobs * ops}")
-        for _ in self._executor.map(worker.process, [ops for _ in range(jobs)]):
-            pass
+        for batch in batched(range(jobs), 200):
+            # avoid generating too many jobs for executor
+            for fut in as_completed(
+                self._executor.submit(worker.process, ops) for _ in batch
+            ):
+                _ = fut.result()
         end = self._session.scalar(Select(sa_func.count(DemoTable.id)))
         assert (end - begin) == jobs * ops
 
@@ -90,9 +105,9 @@ def main():
     cfg = WorkerConfig.from_path(cfg_path)
     _init_logging(cfg.log_path)
 
-    app = DemoApp(cfg)
-    for jobs in range(100, 1000, 100):
-        app.process(jobs, jobs)
+    with DemoApp(cfg) as app:
+        for jobs in range(100, 1000, 100):
+            app.process(jobs, jobs)
 
 
 if __name__ == "__main__":
