@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "mull-at-home"
+description = "mutation test @ home"
+version = "0.1.0"
+authors = ["Zhao Wen Yuan <projects@zhaowy.net>"]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+sqlalchemy = "^2.0.25"
+tomli = {markers = "python_version < '3.11'", version = "^2.0.1"}
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
