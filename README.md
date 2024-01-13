@@ -1,14 +1,6 @@
-# multiprocessing + sqlite demo
+## multiprocessing + sqlite demo
 
-## Description
-
-### Forward compatible, more secure multiprocessing
-
-`mutiprocessing` defaults to `fork` context on POSIX (excluding macOS).
-this demo uses `spawn` instead, as it's more secure and available on all
-major platform.
-
-### Serialized sqlite write
+### Serialized sqlite writes
 
 with `multiprocessing.Lock`, concurrent sqlite writes are serialized
 and won't cause "Database is locked" errors.
@@ -16,9 +8,14 @@ and won't cause "Database is locked" errors.
 each child process maintains its own `sqlalchemy.Engine`, since the
 engine is not share-able.
 
+On child process start, `before_flush` / `after_flush` sqlalchemy event
+listener is registered. Whenever sqlalchemy flushes changes to the database,
+the shared `db_lock` is required & released to ensure serial write access
+to the sqlite database.
+
 ### multiprocessing logger setup
 
-this project also comes with a `QueueHandler` / `QueueListener` based,
+this project also implements a `QueueHandler` / `QueueListener` based,
 multiprocessing capable logging setup.
 
 from the main process:
@@ -32,6 +29,12 @@ from the main process:
 form the child process, in `worker.init`, `basicConfig` would
 set up a `QueueHandler` which writes logs into parent-provided
 `multiprocessing.Queue`.
+
+### Forward compatible, more secure multiprocessing
+
+`mutiprocessing` defaults to `fork` context on POSIX (excluding macOS).
+this demo uses `spawn` instead, as it's more secure and available on all
+major platforms.
 
 ## Requirements / Test setup
 
