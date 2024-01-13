@@ -12,7 +12,8 @@ from sqlalchemy import create_engine, URL, Select, func as sa_func, text as sa_t
 from sqlalchemy.orm import Session
 
 from hmull import worker
-from hmull.model import ModelBase, DemoConfig, DemoTable
+from hmull.model import ModelBase, DemoTable
+from hmull.worker import WorkerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ def _init_db(db_url: URL) -> Session:
 
 
 class DemoApp:
-    def __init__(self, config: DemoConfig):
+    def __init__(self, config: WorkerConfig):
         self._config = config
         self._stack = ExitStack()
 
@@ -39,34 +40,29 @@ class DemoApp:
             ProcessPoolExecutor(initializer=worker.init, initargs=(self._config,))
         )
 
-    def _process_actual(self, worker_func, jobs, ops):
+    def process(self, jobs, ops=100):
         begin = self._session.scalar(Select(sa_func.count(DemoTable.id)))
         logger.info(f"starting mp_process: op_total = {jobs * ops}")
-
-        for _ in self._executor.map(worker_func, [ops for _ in range(jobs)]):
+        for _ in self._executor.map(worker.process, [ops for _ in range(jobs)]):
             pass
-
         end = self._session.scalar(Select(sa_func.count(DemoTable.id)))
         assert (end - begin) == jobs * ops
 
-    def process(self, jobs, ops=100):
-        self._process_actual(worker.process, jobs, ops)
 
-
-def _init_logging(cfg: DemoConfig) -> None:
-    cfg_path = Path(__file__).parent / "demo_config.toml"
-    log_cfg = tomllib.loads(cfg_path.read_text())["logging"]
+def _init_logging(log_path: Path) -> None:
+    cfg_path = Path(__file__).with_name("logging.toml")
+    log_cfg = tomllib.loads(cfg_path.read_text())
     for handler in log_cfg["handlers"].values():
         if handler.get("filename") is not None:
             filename = Path(handler["filename"])
             if not filename.is_absolute():
-                filename = cfg.log_path / filename
+                filename = log_path / filename
             handler["filename"] = filename
     logging_dictConfig(log_cfg)
 
 
 @contextmanager
-def _log_listener(cfg: DemoConfig):
+def _log_listener(cfg: WorkerConfig):
     root_logger = logging.getLogger()
     handlers = copy.copy(root_logger.handlers)
     queue_handler = QueueHandler(cfg.log_queue)
@@ -91,8 +87,8 @@ def _log_listener(cfg: DemoConfig):
 
 def main():
     cfg_path = Path(__file__).parent / ".." / ".local"
-    cfg = DemoConfig.from_path(cfg_path)
-    _init_logging(cfg)
+    cfg = WorkerConfig.from_path(cfg_path)
+    _init_logging(cfg.log_path)
 
     app = DemoApp(cfg)
     for jobs in range(100, 1000, 100):

@@ -1,24 +1,23 @@
-[logging]
 version = 1
 disable_existing_loggers = false
 
-[logging.formatters.simple]
+[formatters.simple]
 format = "[{asctime}] [{processName}:{name}] [{filename}:{lineno}] {levelname}: {message}"
 style = "{"
 
-[logging.handlers.console]
+[handlers.console]
 level = "INFO"
 formatter = "simple"
-class = "logging.StreamHandler"
+class = "StreamHandler"
 stream = "ext://sys.stdout"
 
-[logging.handlers.file]
+[handlers.file]
 formatter = "simple"
-class = "logging.handlers.RotatingFileHandler"
+class = "handlers.RotatingFileHandler"
 filename = "demo.log"
 maxBytes = 10485760  # 10MB
 backupCount = 3
 
-[logging.root]
+[root]
 level = "DEBUG"
 handlers = ["console", "file"]
