@@ -3,6 +3,7 @@ import uuid
 from dataclasses import dataclass, field
 from logging.handlers import QueueHandler
 from multiprocessing import Queue, Lock, RLock
+import multiprocessing as mp
 from pathlib import Path
 from typing import Optional
 
@@ -19,20 +20,27 @@ logger = logging.getLogger(__name__)
 @dataclass
 class WorkerConfig:
     db_url: URL
-    log_path: Path
+    db_lock: mp.Lock
 
-    log_queue: Queue = field(default_factory=Queue)
-    db_lock: Lock = field(default_factory=Lock)
-    pbar_lock: RLock = field(default_factory=tqdm.get_lock)
+    log_path: Path
+    log_queue: mp.Queue
+
+    pbar_lock: mp.RLock
 
     @classmethod
-    def from_path(cls, root: Path) -> "WorkerConfig":
+    def from_path(cls, root: Path, mp_manager: mp.Manager) -> "WorkerConfig":
         root.mkdir(parents=True, exist_ok=True)
         log_path = root / "logs"
         log_path.mkdir(parents=True, exist_ok=True)
         db_url = URL.create(drivername="sqlite", database=str(root / "demo.db"))
-        tqdm.set_lock(RLock())
-        return cls(log_path=log_path, db_url=db_url)
+        tqdm.set_lock(mp_manager.RLock())
+        return cls(
+            db_url=db_url,
+            db_lock=mp_manager.Lock(),
+            log_path=log_path,
+            log_queue=mp_manager.Queue(),
+            pbar_lock=mp_manager.RLock(),
+        )
 
 
 class _Worker:

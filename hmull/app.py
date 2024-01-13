@@ -1,6 +1,6 @@
 import copy
 import logging
-import multiprocessing
+import multiprocessing as mp
 import tomllib
 from concurrent.futures import ProcessPoolExecutor, Executor, as_completed
 from contextlib import ExitStack, contextmanager
@@ -8,6 +8,7 @@ from logging.config import dictConfig as logging_dictConfig
 from logging.handlers import QueueListener, QueueHandler
 from pathlib import Path
 
+from more_itertools import chunked as batched
 from sqlalchemy import create_engine, URL, Select, func as sa_func, text as sa_text
 from sqlalchemy.orm import Session
 from tqdm import tqdm
@@ -15,11 +16,6 @@ from tqdm import tqdm
 from hmull import worker
 from hmull.model import ModelBase, DemoTable
 from hmull.worker import WorkerConfig
-
-try:
-    from itertools import batched  # python >= 3.12
-except ImportError:
-    from more_itertools import chunked as batched
 
 logger = logging.getLogger(__name__)
 
@@ -46,23 +42,30 @@ def _init_db(db_url: URL) -> Session:
 
 
 class DemoApp:
-    def __init__(self, config: WorkerConfig):
-        self._config = config
+    def __init__(self, root: Path, mp_context=None):
         self._stack = ExitStack()
 
-        self._session: Session = self._stack.enter_context(
-            _init_db(self._config.db_url)
-        )
-        self._stack.enter_context(_log_listener(cfg=self._config))
+        mp_context = mp_context or mp.get_context()
+        manager: mp.Manager = self._stack.enter_context(mp_context.Manager())
+
+        config = WorkerConfig.from_path(root, manager)
+        _init_logging(config.log_path)
+
+        self._session: Session = self._stack.enter_context(_init_db(config.db_url))
+        self._stack.enter_context(_log_listener(config))
         self._executor: Executor = self._stack.enter_context(
-            ProcessPoolExecutor(initializer=worker.init, initargs=(self._config,))
+            ProcessPoolExecutor(
+                mp_context=mp_context,
+                initializer=worker.init,
+                initargs=(config,),
+            )
         )
 
     def __enter__(self):
         return self
 
-    def __exit__(self, *args):
-        self._stack.__exit__(*args)
+    def __exit__(self, *args, **kwargs):
+        self._stack.__exit__(*args, **kwargs)
 
     def process(self, jobs: int, ops: int = 100):
         begin = self._session.scalar(Select(sa_func.count(DemoTable.id)))
@@ -115,16 +118,12 @@ def _log_listener(cfg: WorkerConfig):
 
 
 def main():
-    cfg_path = Path(__file__).parent / ".." / ".local"
-    cfg = WorkerConfig.from_path(cfg_path)
-    _init_logging(cfg.log_path)
-
-    with DemoApp(cfg) as app:
-        for jobs in range(100, 1000, 100):
-            app.process(jobs, jobs)
+    runtime_root = Path(__file__).parent / ".." / ".local"
+    with DemoApp(runtime_root) as app:
+        app.process(jobs=100, ops=100)
 
 
 if __name__ == "__main__":
-    multiprocessing.set_start_method("spawn")
+    mp.set_start_method("spawn")
     logger = logging.getLogger("hmull.app")
     main()
