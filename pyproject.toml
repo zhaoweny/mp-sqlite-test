@@ -9,6 +9,7 @@ python = "^3.10"
 sqlalchemy = "^2.0.25"
 tomli = {markers = "python_version < '3.11'", version = "^2.0.1"}
 more-itertools = "^10.2.0"
+tqdm = "^4.66.1"
 
 
 [build-system]

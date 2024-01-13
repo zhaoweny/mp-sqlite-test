@@ -2,14 +2,13 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from logging.handlers import QueueHandler
-from multiprocessing import Queue as MpQueue, Lock as MpLock
-from multiprocessing.synchronize import Lock
-from multiprocessing.queues import Queue
+from multiprocessing import Queue, Lock, RLock
 from pathlib import Path
 from typing import Optional
 
 from sqlalchemy import create_engine, event, URL
 from sqlalchemy.orm import Session
+from tqdm import tqdm
 
 from hmull.model import DemoTable
 
@@ -22,8 +21,9 @@ class WorkerConfig:
     db_url: URL
     log_path: Path
 
-    log_queue: Queue = field(default_factory=MpQueue)
-    db_lock: Lock = field(default_factory=MpLock)
+    log_queue: Queue = field(default_factory=Queue)
+    db_lock: Lock = field(default_factory=Lock)
+    pbar_lock: RLock = field(default_factory=tqdm.get_lock)
 
     @classmethod
     def from_path(cls, root: Path) -> "WorkerConfig":
@@ -31,6 +31,7 @@ class WorkerConfig:
         log_path = root / "logs"
         log_path.mkdir(parents=True, exist_ok=True)
         db_url = URL.create(drivername="sqlite", database=str(root / "demo.db"))
+        tqdm.set_lock(RLock())
         return cls(log_path=log_path, db_url=db_url)
 
 
@@ -38,12 +39,14 @@ class _Worker:
     def __init__(self, config: WorkerConfig):
         self._config = config
         self._engine = create_engine(config.db_url)
+        tqdm.set_lock(config.pbar_lock)
 
     def process(self, item_count: int):
         logger.debug(f"processing: item_count={item_count}")
         with Session(self._engine) as session:
             session.add_all(DemoTable(uuid=uuid.uuid4()) for _ in range(item_count))
             session.commit()
+        return item_count
 
 
 def init(cfg: WorkerConfig):

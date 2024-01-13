@@ -10,17 +10,30 @@ from pathlib import Path
 
 from sqlalchemy import create_engine, URL, Select, func as sa_func, text as sa_text
 from sqlalchemy.orm import Session
+from tqdm import tqdm
 
 from hmull import worker
 from hmull.model import ModelBase, DemoTable
 from hmull.worker import WorkerConfig
 
 try:
-    from itertools import batched
+    from itertools import batched  # python >= 3.12
 except ImportError:
     from more_itertools import chunked as batched
 
 logger = logging.getLogger(__name__)
+
+
+class TqdmStreamHandler(logging.StreamHandler):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            tqdm.write(msg, file=self.stream)
+        except Exception:  # noqa
+            self.handleError(record)
 
 
 def _init_db(db_url: URL) -> Session:
@@ -54,12 +67,13 @@ class DemoApp:
     def process(self, jobs: int, ops: int = 100):
         begin = self._session.scalar(Select(sa_func.count(DemoTable.id)))
         logger.info(f"starting mp_process: op_total = {jobs * ops}")
-        for batch in batched(range(jobs), 200):
-            # avoid generating too many jobs for executor
-            for fut in as_completed(
-                self._executor.submit(worker.process, ops) for _ in batch
-            ):
-                _ = fut.result()
+        with tqdm(total=jobs * ops, desc="mp_process", unit="op") as pbar:
+            for batch in batched(range(jobs), 200):
+                # avoid generating too many jobs for executor
+                for fut in as_completed(
+                    self._executor.submit(worker.process, ops) for _ in batch
+                ):
+                    pbar.update(fut.result())
         end = self._session.scalar(Select(sa_func.count(DemoTable.id)))
         assert (end - begin) == jobs * ops
 
