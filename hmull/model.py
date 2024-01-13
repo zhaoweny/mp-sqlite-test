@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from multiprocessing import Lock
+from multiprocessing import Lock, Queue
 from multiprocessing.managers import SyncManager
 from pathlib import Path
 from uuid import UUID
@@ -25,6 +25,7 @@ class DemoConfig:
     db_url: URL
     log_path: Path
 
+    log_queue: Queue = field(default_factory=Queue)
     db_lock: Lock = field(default_factory=Lock)
 
     @classmethod

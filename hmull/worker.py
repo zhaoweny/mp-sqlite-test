@@ -1,12 +1,10 @@
 import logging
-import os
-import random
-import time
 import uuid
-from contextlib import ExitStack
+from logging.handlers import QueueHandler
+from multiprocessing.synchronize import Lock
 from typing import Optional
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
 
 from hmull.model import DemoConfig, DemoTable
@@ -21,37 +19,30 @@ class _Worker:
         self._engine = create_engine(config.db_url)
 
     def process(self, item_count: int):
-        with ExitStack() as stack:
-            session: Session = stack.enter_context(Session(self._engine))
-            time.sleep(random.random() + 1.0)
+        logger.debug(f"processing: item_count={item_count}")
+        with Session(self._engine) as session:
             session.add_all(DemoTable(uuid=uuid.uuid4()) for _ in range(item_count))
-
-            self._config.db_lock
-            stack.enter_context(self._config.db_lock)
-            logger.info("worker gained db_lock")
             session.commit()
-            return item_count
-
-
-def init_logging(config: DemoConfig):
-    logging.basicConfig(
-        level=logging.DEBUG,
-        style="{",
-        format="[{asctime}] [{processName}.{name}] [{filename}:{lineno}] {levelname}: {message}",
-        filename=config.log_path / f"{os.getpid()}.log",
-    )
 
 
 def init(cfg: DemoConfig):
-    init_logging(cfg)
-    logger.info("initializing worker")
     global _worker
-    assert _worker is None
+    assert _worker is None, "worker is already initialized"
+    logging.basicConfig(level=logging.DEBUG, handlers=[QueueHandler(cfg.log_queue)])
+
     _worker = _Worker(cfg)
+    db_lock: Lock = cfg.db_lock
+
+    @event.listens_for(Session, "before_flush")
+    def _before_flush(*args, **kwargs):
+        db_lock.acquire()
+
+    @event.listens_for(Session, "after_flush")
+    def _after_flush(*args, **kwargs):
+        db_lock.release()
+
+    logger.debug("worker initialized")
 
 
 def process(item_count: int):
-    logger.info("worker start processing")
-    global _worker
-    assert _worker is not None
     return _worker.process(item_count)
